@@ -1,9 +1,10 @@
+using ApiAggregator.BackgroundTasks;
 using ApiAggregator.Configuration;
-using System.Text;
-using System.Text.Json;
+using ApiAggregator.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
-using ApiAggregator.Services;
+using System.Text;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,21 +20,24 @@ builder.Services.Configure<ExternalApiOptions>(
 builder.Services.Configure<JwtSettings>(
     builder.Configuration.GetSection("JwtSettings"));
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    var secretKey = builder.Configuration["JwtSettings:SecretKey"];
+    options.TokenValidationParameters = new TokenValidationParameters
     {
-        var cfg = builder.Configuration.GetSection("JwtSettings");
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = cfg["Issuer"],
-            ValidAudience = cfg["Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(cfg["SecretKey"]))
-        };
-    });
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = builder.Configuration["JwtSettings:Issuer"],
+        ValidAudience = builder.Configuration["JwtSettings:Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey))
+    };
+});
 
 builder.Services.AddHttpClient("OpenWeather", client =>
 {
@@ -56,6 +60,8 @@ builder.Services.AddHttpClient("OpenAI", client =>
 builder.Services.AddScoped<WeatherService>();
 builder.Services.AddScoped<NewsService>();
 builder.Services.AddScoped<OpenAIService>();
+
+builder.Services.AddHostedService<PerformanceMonitorService>();
 
 var app = builder.Build();
 
