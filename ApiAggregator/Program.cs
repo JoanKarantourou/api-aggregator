@@ -40,7 +40,6 @@ builder.Services.AddHttpClient("OpenWeather", client =>
     client.BaseAddress = new Uri(builder.Configuration["ExternalApis:OpenWeather:BaseUrl"]);
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 });
-
 builder.Services.AddHttpClient("NewsApi", client =>
 {
     client.BaseAddress = new Uri(builder.Configuration["ExternalApis:NewsApi:BaseUrl"]);

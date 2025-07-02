@@ -1,10 +1,12 @@
-﻿using ApiAggregator.Models;
-using ApiAggregator.Models.External;
+﻿using ApiAggregator.Models.Weather;
 using ApiAggregator.Services;
 using Microsoft.Extensions.Caching.Memory;
 using System.Diagnostics;
 using System.Text.Json;
 
+/// <summary>
+/// Service for fetching and caching weather data from OpenWeatherMap API.
+/// </summary>
 public class WeatherService
 {
     private readonly IHttpClientFactory _httpClientFactory;
@@ -12,6 +14,9 @@ public class WeatherService
     private readonly StatsService _stats;
     private readonly string _apiKey;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="WeatherService"/> class.
+    /// </summary>
     public WeatherService(IHttpClientFactory httpClientFactory, IMemoryCache cache, StatsService stats, IConfiguration config)
     {
         _httpClientFactory = httpClientFactory;
@@ -20,6 +25,12 @@ public class WeatherService
         _apiKey = config["ExternalApis:OpenWeather:ApiKey"];
     }
 
+    /// <summary>
+    /// Retrieves current weather data for the specified city.
+    /// Uses caching to reduce API calls and records performance metrics.
+    /// </summary>
+    /// <param name="city">The city to fetch weather for.</param>
+    /// <returns>A <see cref="WeatherInfo"/> object, or null if the API call fails.</returns>
     public async Task<WeatherInfo?> GetWeatherAsync(string city)
     {
         if (string.IsNullOrWhiteSpace(city)) return null;

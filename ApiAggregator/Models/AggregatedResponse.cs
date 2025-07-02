@@ -1,15 +1,21 @@
-﻿namespace ApiAggregator.Models;
+﻿using ApiAggregator.Models.News;
+using ApiAggregator.Models.OpenAI;
+using ApiAggregator.Models.Weather;
+using ApiAggregator.Services;
+
+namespace ApiAggregator.Models;
 
 /// <summary>
 /// Represents the full aggregated response returned by the aggregator endpoint.
 /// </summary>
+
 public class AggregatedResponse
 {
-    public Weather.WeatherInfo? Weather { get; set; }
-    public List<News.NewsArticle> News { get; set; } = new();
-    public string? OpenAIResult { get; set; }
+    public WeatherInfo? Weather { get; set; }
+    public List<NewsArticle> News { get; set; }
+    public OpenAICompletion? OpenAI { get; set; }
 
-    public string WeatherStatus { get; set; } = string.Empty;
-    public string NewsStatus { get; set; } = string.Empty;
-    public string OpenAIStatus { get; set; } = string.Empty;
+    public string WeatherStatus { get; set; }
+    public string NewsStatus { get; set; }
+    public string OpenAIStatus { get; set; }
 }

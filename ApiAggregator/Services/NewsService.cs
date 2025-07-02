@@ -1,10 +1,13 @@
-﻿using ApiAggregator.Models;
-using ApiAggregator.Models.External;
+﻿using ApiAggregator.Models.News;
 using ApiAggregator.Services;
 using Microsoft.Extensions.Caching.Memory;
 using System.Diagnostics;
 using System.Text.Json;
 
+/// <summary>
+/// Service for fetching and caching news articles from NewsAPI.
+/// Supports keyword search and category-based top headlines.
+/// </summary>
 public class NewsService
 {
     private readonly IHttpClientFactory _httpClientFactory;
@@ -12,6 +15,9 @@ public class NewsService
     private readonly StatsService _stats;
     private readonly string _apiKey;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="NewsService"/> class.
+    /// </summary>
     public NewsService(IHttpClientFactory httpClientFactory, IMemoryCache cache, StatsService stats, IConfiguration config)
     {
         _httpClientFactory = httpClientFactory;
@@ -20,6 +26,14 @@ public class NewsService
         _apiKey = config["ExternalApis:NewsApi:ApiKey"];
     }
 
+    /// <summary>
+    /// Retrieves a list of news articles by search query or category.
+    /// Uses caching and records API usage statistics.
+    /// </summary>
+    /// <param name="query">Search keyword (e.g., "bitcoin").</param>
+    /// <param name="category">News category (e.g., "technology").</param>
+    /// <param name="sortBy">Sorting parameter ("relevancy", "popularity", "publishedAt").</param>
+    /// <returns>List of <see cref="NewsArticle"/> objects; may be empty if no results or an error occurs.</returns>
     public async Task<List<NewsArticle>> GetNewsAsync(string query, string category, string sortBy)
     {
         string cacheKey, url;
