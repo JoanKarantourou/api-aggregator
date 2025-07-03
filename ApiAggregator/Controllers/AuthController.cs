@@ -1,10 +1,10 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
+﻿using ApiAggregator.Models;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using ApiAggregator.Models;
+using System.ComponentModel.DataAnnotations;
 
 namespace ApiAggregator.Controllers
 {
@@ -20,7 +20,7 @@ namespace ApiAggregator.Controllers
         }
 
         [HttpPost("login")]
-        public IActionResult Login([FromBody] LoginModel login)
+        public IActionResult Login([FromBody][Required] LoginModel login)
         {
             // Simple static validation (demo only)
             if (login.Username == "admin" && login.Password == "password")
@@ -34,7 +34,10 @@ namespace ApiAggregator.Controllers
 
         private string GenerateJwtToken(string username)
         {
-            var secretKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["JwtSettings:SecretKey"]));
+            var rawKey = _config["JwtSettings:SecretKey"]
+                ?? throw new InvalidOperationException("JwtSettings:SecretKey is missing in configuration.");
+
+            var secretKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(rawKey));
             var credentials = new SigningCredentials(secretKey, SecurityAlgorithms.HmacSha256);
 
             var claims = new[]

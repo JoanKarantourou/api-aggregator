@@ -5,7 +5,7 @@
 /// </summary>
 public class OpenAIResponse
 {
-    public List<OpenAIChoice> Choices { get; set; }
+    public List<OpenAIChoice> Choices { get; set; } = new();
 }
 
 /// <summary>
@@ -13,5 +13,5 @@ public class OpenAIResponse
 /// </summary>
 public class OpenAIChoice
 {
-    public string Text { get; set; }
+    public string Text { get; set; } = default!;
 }

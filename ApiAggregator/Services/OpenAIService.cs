@@ -1,5 +1,7 @@
-﻿using ApiAggregator.Models.OpenAI;
+﻿using ApiAggregator.Configuration;
+using ApiAggregator.Models.OpenAI;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -15,18 +17,21 @@ namespace ApiAggregator.Services
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IMemoryCache _cache;
         private readonly StatsService _stats;
+        private readonly ExternalApiOptions.OpenAiApi _options;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="OpenAIService"/> class.
         /// </summary>
-        /// <param name="httpClientFactory">Factory to create named HttpClients.</param>
-        /// <param name="cache">In-memory cache instance.</param>
-        /// <param name="stats">Stats tracker service for monitoring API usage.</param>
-        public OpenAIService(IHttpClientFactory httpClientFactory, IMemoryCache cache, StatsService stats)
+        public OpenAIService(
+            IHttpClientFactory httpClientFactory,
+            IMemoryCache cache,
+            StatsService stats,
+            IOptions<ExternalApiOptions> apiOptions)
         {
             _httpClientFactory = httpClientFactory;
             _cache = cache;
             _stats = stats;
+            _options = apiOptions.Value.OpenAI;
         }
 
         /// <summary>
@@ -40,17 +45,17 @@ namespace ApiAggregator.Services
             if (string.IsNullOrWhiteSpace(prompt)) return null;
 
             string cacheKey = $"openai:completion:{prompt.ToLower()}";
-
-            if (_cache.TryGetValue(cacheKey, out OpenAICompletion cached)) return cached;
+            if (_cache.TryGetValue(cacheKey, out var obj) && obj is OpenAICompletion cached)
+                return cached;
 
             var client = _httpClientFactory.CreateClient("OpenAI");
 
             var requestData = new
             {
-                model = "text-davinci-003",
+                model = _options.Model,
                 prompt = prompt,
-                max_tokens = 100,
-                temperature = 0.7
+                max_tokens = _options.MaxTokens,
+                temperature = _options.Temperature
             };
 
             var json = JsonSerializer.Serialize(requestData);
@@ -63,11 +68,16 @@ namespace ApiAggregator.Services
                 sw.Stop();
                 _stats.Record("OpenAI", sw.ElapsedMilliseconds);
 
-                if (!response.IsSuccessStatusCode) return null;
+                string responseBody = await response.Content.ReadAsStringAsync();
 
-                var responseBody = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorDetails = TryParseOpenAiError(responseBody);
+                    Console.WriteLine($"OpenAI API Error: {response.StatusCode} - {errorDetails}");
+                    return null;
+                }
+
                 var result = JsonSerializer.Deserialize<OpenAIResponse>(responseBody);
-
                 var completion = new OpenAICompletion
                 {
                     Prompt = prompt,
@@ -78,11 +88,25 @@ namespace ApiAggregator.Services
                 _cache.Set(cacheKey, completion, TimeSpan.FromMinutes(30));
                 return completion;
             }
-            catch
+            catch (Exception ex)
             {
                 sw.Stop();
                 _stats.Record("OpenAI", sw.ElapsedMilliseconds);
+                Console.WriteLine($"OpenAIService exception: {ex.Message}");
                 return null;
+            }
+        }
+
+        private string TryParseOpenAiError(string responseBody)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(responseBody);
+                return doc.RootElement.GetProperty("error").GetProperty("message").GetString() ?? "Unknown error";
+            }
+            catch
+            {
+                return "Could not parse OpenAI error message.";
             }
         }
     }

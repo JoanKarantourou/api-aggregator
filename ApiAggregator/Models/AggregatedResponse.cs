@@ -1,7 +1,6 @@
 ﻿using ApiAggregator.Models.News;
 using ApiAggregator.Models.OpenAI;
 using ApiAggregator.Models.Weather;
-using ApiAggregator.Services;
 
 namespace ApiAggregator.Models;
 
@@ -12,10 +11,10 @@ namespace ApiAggregator.Models;
 public class AggregatedResponse
 {
     public WeatherInfo? Weather { get; set; }
-    public List<NewsArticle> News { get; set; }
+    public List<NewsArticle> News { get; set; } = default!;
     public OpenAICompletion? OpenAI { get; set; }
 
-    public string WeatherStatus { get; set; }
-    public string NewsStatus { get; set; }
-    public string OpenAIStatus { get; set; }
+    public string WeatherStatus { get; set; } = default!;
+    public string NewsStatus { get; set; } = default!;
+    public string OpenAIStatus { get; set; } = default!;
 }

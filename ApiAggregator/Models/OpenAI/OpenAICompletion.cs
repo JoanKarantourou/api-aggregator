@@ -5,7 +5,7 @@
 /// </summary>
 public class OpenAICompletion
 {
-    public string Prompt { get; set; }
-    public string CompletionText { get; set; }
+    public string Prompt { get; set; } = default!;
+    public string CompletionText { get; set; } = default!;
     public DateTime RetrievedAt { get; set; }
 }

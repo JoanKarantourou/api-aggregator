@@ -1,4 +1,7 @@
-﻿namespace ApiAggregator.Services
+﻿using ApiAggregator.Models.Stats;
+using System.Collections.Concurrent;
+
+namespace ApiAggregator.Services
 {
     /// <summary>
     /// Tracks usage and response performance of external APIs.
@@ -15,8 +18,7 @@
             public long SlowCount;
         }
 
-        private readonly object _lock = new();
-        private readonly Dictionary<string, ApiStats> _stats = new();
+        private readonly ConcurrentDictionary<string, ApiStats> _stats = new();
 
         /// <summary>
         /// Records a completed request's duration for a specified external API.
@@ -26,24 +28,17 @@
         /// <param name="durationMs">The response time in milliseconds.</param>
         public void Record(string apiName, long durationMs)
         {
-            lock (_lock)
-            {
-                if (!_stats.ContainsKey(apiName))
-                {
-                    _stats[apiName] = new ApiStats();
-                }
+            var stat = _stats.GetOrAdd(apiName, _ => new ApiStats());
 
-                var stat = _stats[apiName];
-                stat.TotalRequests++;
-                stat.TotalDurationMs += durationMs;
+            Interlocked.Increment(ref stat.TotalRequests);
+            Interlocked.Add(ref stat.TotalDurationMs, durationMs);
 
-                if (durationMs < 100)
-                    stat.FastCount++;
-                else if (durationMs < 200)
-                    stat.MediumCount++;
-                else
-                    stat.SlowCount++;
-            }
+            if (durationMs < 100)
+                Interlocked.Increment(ref stat.FastCount);
+            else if (durationMs < 200)
+                Interlocked.Increment(ref stat.MediumCount);
+            else
+                Interlocked.Increment(ref stat.SlowCount);
         }
 
         /// <summary>
@@ -55,33 +50,30 @@
         /// with statistics such as total requests, average response time, and
         /// counts in Fast/Medium/Slow performance buckets.
         /// </returns>
-        public Dictionary<string, object> GetStatisticsReport()
+        public Dictionary<string, ApiStatisticsReport> GetStatisticsReport()
         {
-            lock (_lock)
+            var report = new Dictionary<string, ApiStatisticsReport>();
+
+            foreach (var entry in _stats)
             {
-                var report = new Dictionary<string, object>();
+                var apiName = entry.Key;
+                var stat = entry.Value;
 
-                foreach (var entry in _stats)
+                if (stat.TotalRequests == 0) continue;
+
+                double average = (double)stat.TotalDurationMs / stat.TotalRequests;
+
+                report[apiName] = new ApiStatisticsReport
                 {
-                    var apiName = entry.Key;
-                    var stat = entry.Value;
-
-                    if (stat.TotalRequests == 0) continue;
-
-                    double average = (double)stat.TotalDurationMs / stat.TotalRequests;
-
-                    report[apiName] = new
-                    {
-                        stat.TotalRequests,
-                        AverageResponseTimeMs = Math.Round(average, 2),
-                        stat.FastCount,
-                        stat.MediumCount,
-                        stat.SlowCount
-                    };
-                }
-
-                return report;
+                    TotalRequests = stat.TotalRequests,
+                    AverageResponseTimeMs = Math.Round(average, 2),
+                    FastCount = stat.FastCount,
+                    MediumCount = stat.MediumCount,
+                    SlowCount = stat.SlowCount
+                };
             }
+
+            return report;
         }
     }
 }

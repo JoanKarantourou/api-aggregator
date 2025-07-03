@@ -1,6 +1,8 @@
-﻿using ApiAggregator.Models.Weather;
+﻿using ApiAggregator.Configuration;
+using ApiAggregator.Models.Weather;
 using ApiAggregator.Services;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Text.Json;
 
@@ -12,17 +14,33 @@ public class WeatherService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IMemoryCache _cache;
     private readonly StatsService _stats;
+    private readonly ILogger<WeatherService> _logger;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly string _apiKey;
+    private readonly int _cacheMinutes;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="WeatherService"/> class.
     /// </summary>
-    public WeatherService(IHttpClientFactory httpClientFactory, IMemoryCache cache, StatsService stats, IConfiguration config)
+    public WeatherService(
+        IHttpClientFactory httpClientFactory,
+        IMemoryCache cache,
+        StatsService stats,
+        ILogger<WeatherService> logger,
+        IHttpContextAccessor httpContextAccessor,
+        IConfiguration config,
+        IOptions<ExternalApiOptions> apiOptions)
     {
         _httpClientFactory = httpClientFactory;
         _cache = cache;
         _stats = stats;
-        _apiKey = config["ExternalApis:OpenWeather:ApiKey"];
+        _logger = logger;
+        _httpContextAccessor = httpContextAccessor;
+
+        _apiKey = config["ExternalApis:OpenWeather:ApiKey"]
+            ?? throw new InvalidOperationException("OpenWeather:ApiKey is missing in configuration.");
+
+        _cacheMinutes = apiOptions.Value.OpenWeather.CacheMinutes;
     }
 
     /// <summary>
@@ -36,39 +54,50 @@ public class WeatherService
         if (string.IsNullOrWhiteSpace(city)) return null;
 
         string cacheKey = $"weather:{city.ToLower()}";
-        if (_cache.TryGetValue(cacheKey, out WeatherInfo cached)) return cached;
+        if (_cache.TryGetValue(cacheKey, out var obj) && obj is WeatherInfo cached)
+            return cached;
 
         var client = _httpClientFactory.CreateClient("OpenWeather");
         var sw = Stopwatch.StartNew();
+        var cancellationToken = _httpContextAccessor.HttpContext?.RequestAborted ?? CancellationToken.None;
 
         try
         {
-            string url = $"weather?q={Uri.EscapeDataString(city)}&appid={_apiKey}&units=metric";
-            var response = await client.GetAsync(url);
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"weather?q={Uri.EscapeDataString(city)}&appid={_apiKey}&units=metric");
+
+            var response = await client.SendAsync(request, cancellationToken);
             sw.Stop();
             _stats.Record("OpenWeatherMap", sw.ElapsedMilliseconds);
 
-            if (!response.IsSuccessStatusCode) return null;
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to get weather for {City}. Status code: {StatusCode}", city, response.StatusCode);
+                return null;
+            }
 
-            string json = await response.Content.ReadAsStringAsync();
+            string json = await response.Content.ReadAsStringAsync(cancellationToken);
             var dto = JsonSerializer.Deserialize<OpenWeatherResponse>(json);
+
+            if (dto == null) return null;
 
             var result = new WeatherInfo
             {
                 City = city,
-                Description = dto?.Weather.FirstOrDefault()?.Description ?? "No description",
-                Temperature = dto?.Main.Temp ?? 0,
-                Humidity = dto?.Main.Humidity ?? 0,
+                Description = dto.Weather.FirstOrDefault()?.Description ?? "No description",
+                Temperature = dto.Main.Temp,
+                Humidity = dto.Main.Humidity,
                 RetrievedAt = DateTime.UtcNow
             };
 
-            _cache.Set(cacheKey, result, TimeSpan.FromMinutes(5));
+            _cache.Set(cacheKey, result, TimeSpan.FromMinutes(_cacheMinutes));
             return result;
         }
-        catch
+        catch (Exception ex)
         {
             sw.Stop();
             _stats.Record("OpenWeatherMap", sw.ElapsedMilliseconds);
+            _logger.LogError(ex, "Exception occurred while fetching weather for {City}", city);
             return null;
         }
     }

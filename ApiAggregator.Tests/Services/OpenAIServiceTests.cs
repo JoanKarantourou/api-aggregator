@@ -1,12 +1,10 @@
-﻿using ApiAggregator.Models;
-using ApiAggregator.Services;
+﻿using ApiAggregator.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Moq;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using Xunit;
 
 public class OpenAIServiceTests
 {

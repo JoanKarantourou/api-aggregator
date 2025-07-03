@@ -1,13 +1,11 @@
-﻿using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using ApiAggregator.Models.Stats;
 using ApiAggregator.Services;
 
-namespace ApiAggregator.BackgroundTasks
+namespace ApiAggregator.HostedServices
 {
+    /// <summary>
+    /// Background service that monitors API response times and logs anomalies.
+    /// </summary>
     public class PerformanceMonitorService : BackgroundService
     {
         private readonly ILogger<PerformanceMonitorService> _logger;
@@ -34,28 +32,19 @@ namespace ApiAggregator.BackgroundTasks
                     foreach (var entry in report)
                     {
                         string apiName = entry.Key;
+                        double currentAvg = entry.Value.AverageResponseTimeMs;
 
-                        if (entry.Value != null)
+                        if (_lastAverages.TryGetValue(apiName, out var prevAvg))
                         {
-                            var stats = entry.Value;
-                            var avgProperty = stats.GetType().GetProperty("AverageResponseTimeMs");
-                            if (avgProperty != null)
+                            if (prevAvg > 0 && currentAvg > 1.5 * prevAvg)
                             {
-                                double currentAvg = (double)avgProperty.GetValue(stats);
-
-                                if (_lastAverages.TryGetValue(apiName, out double previousAvg))
-                                {
-                                    if (previousAvg > 0 && currentAvg > 1.5 * previousAvg)
-                                    {
-                                        _logger.LogWarning(
-                                            "Performance anomaly detected for {Api}: avg response time {Current}ms is >50% higher than previous {Previous}ms",
-                                            apiName, currentAvg, previousAvg);
-                                    }
-                                }
-
-                                _lastAverages[apiName] = currentAvg;
+                                _logger.LogWarning(
+                                    "[{Timestamp}] Performance anomaly detected for {Api}: avg response time {Current}ms is >50% higher than previous {Previous}ms",
+                                    DateTime.UtcNow.ToString("u"), apiName, currentAvg, prevAvg);
                             }
                         }
+
+                        _lastAverages[apiName] = currentAvg;
                     }
                 }
                 catch (Exception ex)
