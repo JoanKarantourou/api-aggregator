@@ -1,5 +1,4 @@
-﻿using ApiAggregator.Models.Stats;
-using ApiAggregator.Services;
+﻿using ApiAggregator.Services;
 
 namespace ApiAggregator.HostedServices
 {
@@ -13,12 +12,42 @@ namespace ApiAggregator.HostedServices
         private readonly TimeSpan _interval = TimeSpan.FromMinutes(5);
         private readonly Dictionary<string, double> _lastAverages = new();
 
-        public PerformanceMonitorService(ILogger<PerformanceMonitorService> logger, StatsService stats)
+        public PerformanceMonitorService(
+            ILogger<PerformanceMonitorService> logger,
+            StatsService stats)
         {
             _logger = logger;
             _stats = stats;
         }
 
+        /// <summary>
+        /// Checks the current statistics and logs a warning if any API's
+        /// average response time exceeds 150% of its previous average.
+        /// </summary>
+        public async Task CheckPerformanceAsync()
+        {
+            var report = _stats.GetStatisticsReport();
+            foreach (var kvp in report)
+            {
+                var apiName = kvp.Key;
+                var avgNow = kvp.Value.AverageResponseTimeMs;
+                if (_lastAverages.TryGetValue(apiName, out var prevAvg) && prevAvg > 0)
+                {
+                    if (avgNow > prevAvg * 1.5)
+                    {
+                        _logger.LogWarning(
+                            "[PerformanceMonitor] Performance anomaly detected for {Api}: current average {Current}ms is >150% of previous {Previous}ms",
+                            apiName, avgNow, prevAvg);
+                    }
+                }
+                _lastAverages[apiName] = avgNow;
+            }
+            await Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Runs the background loop, invoking CheckPerformanceAsync at each interval.
+        /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("PerformanceMonitorService started.");
@@ -27,25 +56,7 @@ namespace ApiAggregator.HostedServices
             {
                 try
                 {
-                    var report = _stats.GetStatisticsReport();
-
-                    foreach (var entry in report)
-                    {
-                        string apiName = entry.Key;
-                        double currentAvg = entry.Value.AverageResponseTimeMs;
-
-                        if (_lastAverages.TryGetValue(apiName, out var prevAvg))
-                        {
-                            if (prevAvg > 0 && currentAvg > 1.5 * prevAvg)
-                            {
-                                _logger.LogWarning(
-                                    "[{Timestamp}] Performance anomaly detected for {Api}: avg response time {Current}ms is >50% higher than previous {Previous}ms",
-                                    DateTime.UtcNow.ToString("u"), apiName, currentAvg, prevAvg);
-                            }
-                        }
-
-                        _lastAverages[apiName] = currentAvg;
-                    }
+                    await CheckPerformanceAsync();
                 }
                 catch (Exception ex)
                 {

@@ -7,6 +7,6 @@ namespace ApiAggregator.Services.Interfaces
     /// </summary>
     public interface IOpenAIService
     {
-        Task<OpenAICompletion> GetCompletionAsync(string prompt, CancellationToken cancellationToken);
+        Task<OpenAICompletion?> GetCompletionAsync(string prompt, CancellationToken cancellationToken);
     }
 }

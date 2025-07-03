@@ -1,81 +1,110 @@
 ﻿using ApiAggregator.Services;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Moq;
+using Moq.Protected;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
-public class OpenAIServiceTests
+namespace ApiAggregator.Tests.Services
 {
-    private OpenAIService _openAIService;
-    private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
-    private readonly IMemoryCache _cache;
-    private readonly Mock<IConfiguration> _configMock;
-
-    public OpenAIServiceTests()
+    public class OpenAIServiceTests
     {
-        _httpClientFactoryMock = new Mock<IHttpClientFactory>();
-        _cache = new MemoryCache(new MemoryCacheOptions());
+        private readonly OpenAIService _openAIService;
+        private readonly Mock<IHttpClientFactory> _httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        private readonly Mock<HttpMessageHandler> _handlerMock = new Mock<HttpMessageHandler>();
+        private readonly IMemoryCache _cache = new MemoryCache(new MemoryCacheOptions());
+        private readonly IOptions<ExternalApiOptions> _options;
 
-        _configMock = new Mock<IConfiguration>();
-        _configMock.Setup(c => c["ExternalApis:OpenAI:ApiKey"]).Returns("fake-api-key");
-    }
-
-    [Fact]
-    public async Task GetCompletionAsync_ReturnsCompletionText()
-    {
-        // Arrange
-        var responseObj = new
+        public OpenAIServiceTests()
         {
-            choices = new[]
+            // Configure ExternalApiOptions for OpenAI
+            var optionsModel = new ExternalApiOptions
             {
-                new {
-                    text = "This is a mock OpenAI completion."
+                OpenAI = new ExternalApiOptions.OpenAiApi
+                {
+                    BaseUrl = "https://api.openai.com/v1/",
+                    ApiKey = "fake-api-key",
+                    Model = "test-model",
+                    MaxTokens = 16,
+                    Temperature = 0.7
                 }
-            }
-        };
+            };
+            _options = Options.Create(optionsModel);
 
-        var fakeResponse = new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent(JsonSerializer.Serialize(responseObj))
-        };
-        fakeResponse.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            // Prepare fake HTTP response
+            var responseObj = new
+            {
+                choices = new[]
+                {
+                    new { text = "This is a mock completion." }
+                }
+            };
+            var fakeResponse = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(responseObj))
+            };
+            fakeResponse.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
-        var handler = new FakeHttpMessageHandler(fakeResponse);
-        var client = new HttpClient(handler)
-        {
-            BaseAddress = new Uri("https://api.openai.com/v1/")
-        };
+            // Setup mock handler
+            _handlerMock.Protected()
+                .Setup<Task<HttpResponseMessage>>(
+                    "SendAsync",
+                    ItExpr.IsAny<HttpRequestMessage>(),
+                    ItExpr.IsAny<CancellationToken>())
+                .ReturnsAsync(fakeResponse);
 
-        _httpClientFactoryMock.Setup(x => x.CreateClient(It.IsAny<string>())).Returns(client);
+            // Create HttpClient with mock handler
+            var client = new HttpClient(_handlerMock.Object)
+            {
+                BaseAddress = new Uri(optionsModel.OpenAI.BaseUrl)
+            };
+            _httpClientFactoryMock
+                .Setup(f => f.CreateClient("OpenAI"))
+                .Returns(client);
 
-        _openAIService = new OpenAIService(
-            _httpClientFactoryMock.Object,
-            _cache,
-            new StatsService()
-        );
-
-        // Act
-        var result = await _openAIService.GetCompletionAsync("tell me a joke");
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Contains("mock OpenAI", result.CompletionText);
-    }
-
-    private class FakeHttpMessageHandler : HttpMessageHandler
-    {
-        private readonly HttpResponseMessage _response;
-
-        public FakeHttpMessageHandler(HttpResponseMessage response)
-        {
-            _response = response;
+            // Construct the service under test
+            _openAIService = new OpenAIService(
+                _httpClientFactoryMock.Object,
+                _cache,
+                new StatsService(),
+                _options
+            );
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        [Theory]
+        [InlineData("tell me a joke")]
+        [InlineData("hello world")]
+        public async Task GetCompletionAsync_ReturnsCompletionText(string prompt)
         {
-            return Task.FromResult(_response);
+            // Act
+            var result = await _openAIService.GetCompletionAsync(prompt, CancellationToken.None);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Contains("mock completion", result.CompletionText, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Theory]
+        [InlineData("tell me a joke")]
+        [InlineData("hello world")]
+        public async Task GetCompletionAsync_CachesResult_OnlyOneHttpCall(string prompt)
+        {
+            // Act: call twice
+            var first = await _openAIService.GetCompletionAsync(prompt, CancellationToken.None);
+            var second = await _openAIService.GetCompletionAsync(prompt, CancellationToken.None);
+
+            // Assert: same result
+            Assert.Equal(first.CompletionText, second.CompletionText);
+
+            // Verify only one HTTP call
+            _handlerMock.Protected().Verify(
+                "SendAsync",
+                Times.Once(),
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>()
+            );
         }
     }
 }
