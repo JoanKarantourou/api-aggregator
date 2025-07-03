@@ -1,18 +1,18 @@
-﻿using ApiAggregator.Configuration;
-using ApiAggregator.Models.OpenAI;
+﻿using ApiAggregator.Models.OpenAI;
+using ApiAggregator.Services.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
-namespace ApiAggregator.Services
+namespace ApiAggregator.Services 
 {
     /// <summary>
     /// Handles interaction with the OpenAI completions API.
     /// Responsible for requesting completions, caching results, and recording performance statistics.
     /// </summary>
-    public class OpenAIService
+    public class OpenAIService : IOpenAIService
     {
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IMemoryCache _cache;
@@ -39,10 +39,12 @@ namespace ApiAggregator.Services
         /// Returns cached result if available.
         /// </summary>
         /// <param name="prompt">The user prompt for which a completion is requested.</param>
+        /// <param name="cancellationToken">Token to observe while waiting for the task to complete.</param>
         /// <returns>An <see cref="OpenAICompletion"/> object with the result, or null if the request failed.</returns>
-        public async Task<OpenAICompletion?> GetCompletionAsync(string prompt)
+        public async Task<OpenAICompletion?> GetCompletionAsync(string prompt, CancellationToken cancellationToken)
         {
-            if (string.IsNullOrWhiteSpace(prompt)) return null;
+            if (string.IsNullOrWhiteSpace(prompt))
+                return null;
 
             string cacheKey = $"openai:completion:{prompt.ToLower()}";
             if (_cache.TryGetValue(cacheKey, out var obj) && obj is OpenAICompletion cached)
@@ -64,11 +66,11 @@ namespace ApiAggregator.Services
             var sw = Stopwatch.StartNew();
             try
             {
-                var response = await client.PostAsync("completions", content);
+                var response = await client.PostAsync("completions", content, cancellationToken);
                 sw.Stop();
                 _stats.Record("OpenAI", sw.ElapsedMilliseconds);
 
-                string responseBody = await response.Content.ReadAsStringAsync();
+                string responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -81,7 +83,7 @@ namespace ApiAggregator.Services
                 var completion = new OpenAICompletion
                 {
                     Prompt = prompt,
-                    CompletionText = result?.Choices?.FirstOrDefault()?.Text?.Trim() ?? "",
+                    CompletionText = result?.Choices?.FirstOrDefault()?.Text?.Trim() ?? string.Empty,
                     RetrievedAt = DateTime.UtcNow
                 };
 

@@ -5,23 +5,23 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ApiAggregator.Controllers
 {
-    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
+    [AllowAnonymous]
     public class AggregatorController : ControllerBase
     {
         private readonly WeatherService _weatherService;
         private readonly NewsService _newsService;
-        private readonly OpenAIService _openAIService;
+        private readonly OpenAIService _openAiService;
 
         public AggregatorController(
             WeatherService weatherService,
             NewsService newsService,
-            OpenAIService openAIService)
+            OpenAIService openAiService)
         {
             _weatherService = weatherService;
             _newsService = newsService;
-            _openAIService = openAIService;
+            _openAiService = openAiService;
         }
 
         [HttpGet]
@@ -30,33 +30,50 @@ namespace ApiAggregator.Controllers
             [FromQuery] string? newsQuery,
             [FromQuery] string? newsCategory,
             [FromQuery] string? sortBy,
-            [FromQuery] string? openAiPrompt)
+            [FromQuery] string? openAiPrompt,
+            [FromQuery] string? githubTopic,
+            [FromQuery] string? githubLanguage)
         {
-            city ??= "London";
-            if (string.IsNullOrEmpty(newsQuery) && string.IsNullOrEmpty(newsCategory))
-                newsCategory = "general";
+            // Set default values
+            if (string.IsNullOrEmpty(city)) city = "London";
+            if (string.IsNullOrEmpty(newsQuery) && string.IsNullOrEmpty(newsCategory)) newsCategory = "general";
 
-            var weatherTask = _weatherService.GetWeatherAsync(city);
-            var newsTask = _newsService.GetNewsAsync(newsQuery ?? "", newsCategory ?? "", sortBy ?? "");
-            var openAITask = _openAIService.GetCompletionAsync(openAiPrompt ?? "");
+            // Start tasks in parallel, passing the cancellation token
+            var weatherTask = _weatherService.GetWeatherAsync(city, HttpContext.RequestAborted);
+            var newsTask = _newsService.GetNewsAsync(newsQuery ?? string.Empty, newsCategory ?? string.Empty, sortBy ?? string.Empty, HttpContext.RequestAborted);
+            var openAiTask = _openAiService.GetCompletionAsync(openAiPrompt ?? string.Empty, HttpContext.RequestAborted);
 
-            await Task.WhenAll(weatherTask, newsTask, openAITask);
+            // Wrap parallel execution in try/catch
+            try
+            {
+                await Task.WhenAll(weatherTask, newsTask, openAiTask);
+            }
+            catch (Exception)
+            {
+                // Optionally log the exception here
+            }
 
+            // Retrieve results
             var weather = weatherTask.Result;
             var news = newsTask.Result;
-            var openAI = openAITask.Result;
+            var openAiResult = openAiTask.Result;
 
-            var response = new AggregatedResponse
+            // Determine statuses
+            string weatherStatus = weather != null ? "OK" : "Unavailable";
+            string newsStatus = (news != null && news.Count > 0) ? "OK" : "Unavailable or No results";
+            string openAiStatus = openAiResult != null ? "OK" : "Unavailable";
+
+            var aggregatedResponse = new AggregatedResponse
             {
                 Weather = weather,
-                News = news,
-                OpenAI = openAI,
-                WeatherStatus = weather != null ? "OK" : "Unavailable",
-                NewsStatus = news?.Any() == true ? "OK" : "Unavailable or No results",
-                OpenAIStatus = openAI != null ? "OK" : "Unavailable"
+                News = news!,
+                OpenAI = openAiResult,
+                WeatherStatus = weatherStatus,
+                NewsStatus = newsStatus,
+                OpenAIStatus = openAiStatus,
             };
 
-            return Ok(response);
+            return Ok(aggregatedResponse);
         }
 
         [HttpGet("stats")]

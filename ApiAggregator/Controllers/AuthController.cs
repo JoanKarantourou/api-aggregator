@@ -1,35 +1,47 @@
 ﻿using ApiAggregator.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
+using System.ComponentModel.DataAnnotations;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using System.ComponentModel.DataAnnotations;
 
 namespace ApiAggregator.Controllers
 {
     [ApiController]
+    [ApiExplorerSettings(IgnoreApi = true)]
     [Route("api/[controller]")]
     public class AuthController : ControllerBase
     {
         private readonly IConfiguration _config;
+        private readonly string _username;
+        private readonly string _password;
 
         public AuthController(IConfiguration config)
         {
             _config = config;
+            _username = _config["DemoCredentials:Username"]!;
+            _password = _config["DemoCredentials:Password"]!;
         }
 
         [HttpPost("login")]
         public IActionResult Login([FromBody][Required] LoginModel login)
         {
             // Simple static validation (demo only)
-            if (login.Username == "admin" && login.Password == "password")
+            if (login.Username == _username && login.Password == _password)
             {
                 var token = GenerateJwtToken(login.Username);
                 return Ok(new { token });
             }
 
             return Unauthorized();
+        }
+
+        [HttpPost("refresh-token")]
+        public IActionResult RefreshToken([FromBody] RefreshTokenRequest request)
+        {
+            return StatusCode(StatusCodes.Status501NotImplemented,
+                new { Message = "Refresh-token endpoint not implemented." });
         }
 
         private string GenerateJwtToken(string username)
@@ -56,5 +68,10 @@ namespace ApiAggregator.Controllers
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
+    }
+
+    public class RefreshTokenRequest
+    {
+        public string RefreshToken { get; set; } = string.Empty;
     }
 }

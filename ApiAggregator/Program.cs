@@ -1,6 +1,7 @@
 ﻿using ApiAggregator.Configuration;
 using ApiAggregator.HostedServices;
 using ApiAggregator.Services;
+using ApiAggregator.Services.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -105,9 +106,9 @@ builder.Services.AddHttpClient("OpenAI", client =>
 .AddPolicyHandler(GetRetryPolicy());
 
 // DI: services & hosted tasks
-builder.Services.AddScoped<WeatherService>();
-builder.Services.AddScoped<NewsService>();
-builder.Services.AddScoped<OpenAIService>();
+builder.Services.AddScoped<IWeatherService, WeatherService>();
+builder.Services.AddScoped<INewsService, NewsService>();
+builder.Services.AddScoped<IOpenAIService, OpenAIService>();
 builder.Services.AddHostedService<PerformanceMonitorService>();
 
 var app = builder.Build();
