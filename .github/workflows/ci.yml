@@ -26,7 +26,4 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Test and collect coverage
-        run: |
-          dotnet test ApiAggregator.Tests/ApiAggregator.Tests.csproj \
-            --no-build --configuration Release \
-            /p:CollectCoverage=true
+        run: dotnet test ApiAggregator.Tests/ApiAggregator.Tests.csproj --no-build --configuration Release -p:CollectCoverage=true
