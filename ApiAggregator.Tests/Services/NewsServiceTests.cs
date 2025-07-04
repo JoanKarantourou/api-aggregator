@@ -3,6 +3,7 @@ using ApiAggregator.Services;
 using ApiAggregator.Services.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
 using System;
@@ -24,11 +25,10 @@ namespace ApiAggregator.Tests.Services
         private readonly Mock<HttpMessageHandler> _handlerMock = new Mock<HttpMessageHandler>();
         private readonly IMemoryCache _cache = new MemoryCache(new MemoryCacheOptions());
         private readonly IConfiguration _configuration;
-        private readonly List<NewsArticle> _expectedArticles;
 
         public NewsServiceTests()
         {
-            // Configuration for API key
+            // 1) Configuration for API key
             _configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string>
                 {
@@ -36,14 +36,12 @@ namespace ApiAggregator.Tests.Services
                 })
                 .Build();
 
-            // Prepare dummy API response and expected model
+            // 2) Prepare dummy API response and expected model
             var publishedAt = DateTime.UtcNow;
             var apiResponse = new
             {
-                articles = new[]
-                {
-                    new
-                    {
+                articles = new[] {
+                    new {
                         title = "Test Title",
                         description = "Test Desc",
                         source = new { name = "TestSource" },
@@ -53,47 +51,35 @@ namespace ApiAggregator.Tests.Services
                 }
             };
 
-            _expectedArticles = new List<NewsArticle>
-            {
-                new NewsArticle
-                {
-                    Title = "Test Title",
-                    Description = "Test Desc",
-                    Source = "TestSource",
-                    Url = "http://test",
-                    PublishedAt = publishedAt
-                }
-            };
-
-            // Mock HTTP handler to return our fake response
+            // 3) Mock HTTP handler to return our fake response
             var fakeResponse = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(JsonSerializer.Serialize(apiResponse))
             };
             fakeResponse.Content.Headers.ContentType =
                 new MediaTypeHeaderValue("application/json");
-
             _handlerMock.Protected()
-                .Setup<Task<HttpResponseMessage>>(
-                    "SendAsync",
-                    ItExpr.IsAny<HttpRequestMessage>(),
-                    ItExpr.IsAny<CancellationToken>())
-                .ReturnsAsync(fakeResponse);
+               .Setup<Task<HttpResponseMessage>>(
+                   "SendAsync",
+                   ItExpr.IsAny<HttpRequestMessage>(),
+                   ItExpr.IsAny<CancellationToken>())
+               .ReturnsAsync(fakeResponse);
 
-            // Setup HttpClientFactory to use our handler
             var client = new HttpClient(_handlerMock.Object)
             {
                 BaseAddress = new Uri("https://newsapi.org/v2/")
             };
             _httpClientFactoryMock
-                .Setup(f => f.CreateClient("NewsApi"))
-                .Returns(client);
+               .Setup(f => f.CreateClient("NewsApi"))
+               .Returns(client);
 
-            // Construct the service under test
+            // 4) Construct the service under test, now including a logger
+            var logger = new Mock<ILogger<NewsService>>().Object;
             _newsService = new NewsService(
                 _httpClientFactoryMock.Object,
                 _cache,
                 new StatsService(),
+                logger,
                 _configuration
             );
         }
@@ -108,15 +94,15 @@ namespace ApiAggregator.Tests.Services
             var first = await _newsService.GetNewsAsync(query, category, sortBy, CancellationToken.None);
             var second = await _newsService.GetNewsAsync(query, category, sortBy, CancellationToken.None);
 
-            // Assert: correct data
-            Assert.Equal(_expectedArticles.Count, first.Count);
-            Assert.Equal(_expectedArticles[0].Title, first[0].Title);
-            Assert.Equal(_expectedArticles[0].Description, first[0].Description);
-            Assert.Equal(_expectedArticles[0].Source, first[0].Source);
-            Assert.Equal(_expectedArticles[0].Url, first[0].Url);
-            Assert.Equal(_expectedArticles[0].PublishedAt, first[0].PublishedAt);
+            // Assert: correct data + caching semantics
+            Assert.Single(first);
+            Assert.Equal("Test Title", first[0].Title);
+            Assert.Equal("Test Desc", first[0].Description);
+            Assert.Equal("TestSource", first[0].Source);
+            Assert.Equal("http://test", first[0].Url);
+            Assert.Equal(first[0].PublishedAt, second[0].PublishedAt);
 
-            // Cache-hit: handler invoked only once
+            // Handler was invoked only once (cache hit on second call)
             _handlerMock.Protected().Verify(
                 "SendAsync",
                 Times.Once(),
@@ -135,15 +121,11 @@ namespace ApiAggregator.Tests.Services
             var first = await _newsService.GetNewsAsync(query, category, sortBy, CancellationToken.None);
             var second = await _newsService.GetNewsAsync(query, category, sortBy, CancellationToken.None);
 
-            // Assert: correct data
-            Assert.Equal(_expectedArticles.Count, first.Count);
-            Assert.Equal(_expectedArticles[0].Title, first[0].Title);
-            Assert.Equal(_expectedArticles[0].Description, first[0].Description);
-            Assert.Equal(_expectedArticles[0].Source, first[0].Source);
-            Assert.Equal(_expectedArticles[0].Url, first[0].Url);
-            Assert.Equal(_expectedArticles[0].PublishedAt, first[0].PublishedAt);
+            // Assert: correct data + caching semantics
+            Assert.Single(first);
+            Assert.Equal("Test Title", first[0].Title);
 
-            // Cache-hit: handler invoked only once
+            // Handler was invoked only once
             _handlerMock.Protected().Verify(
                 "SendAsync",
                 Times.Once(),

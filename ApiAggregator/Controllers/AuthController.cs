@@ -1,5 +1,7 @@
-﻿using ApiAggregator.Models;
+﻿using ApiAggregator.Configuration;
+using ApiAggregator.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.ComponentModel.DataAnnotations;
 using System.IdentityModel.Tokens.Jwt;
@@ -13,28 +15,37 @@ namespace ApiAggregator.Controllers
     [Route("api/[controller]")]
     public class AuthController : ControllerBase
     {
-        private readonly IConfiguration _config;
+        private readonly JwtSettings _jwtSettings;
+        private readonly ILogger<AuthController> _logger;
         private readonly string _username;
         private readonly string _password;
 
-        public AuthController(IConfiguration config)
+        public AuthController(
+            IConfiguration config,
+            IOptions<JwtSettings> jwtOptions,
+            ILogger<AuthController> logger)
         {
-            _config = config;
-            _username = _config["DemoCredentials:Username"]!;
-            _password = _config["DemoCredentials:Password"]!;
+            _jwtSettings = jwtOptions.Value;
+            _logger = logger;
+
+            _username = config["DemoCredentials:Username"]
+                ?? throw new InvalidOperationException("DemoCredentials:Username is missing.");
+            _password = config["DemoCredentials:Password"]
+                ?? throw new InvalidOperationException("DemoCredentials:Password is missing.");
         }
 
         [HttpPost("login")]
         public IActionResult Login([FromBody][Required] LoginModel login)
         {
-            // Simple static validation (demo only)
             if (login.Username == _username && login.Password == _password)
             {
                 var token = GenerateJwtToken(login.Username);
+                _logger.LogInformation("JWT issued for user '{Username}'", login.Username);
                 return Ok(new { token });
             }
 
-            return Unauthorized();
+            _logger.LogWarning("Unauthorized login attempt for username '{Username}'", login.Username);
+            return Unauthorized(new { Message = "Invalid credentials." });
         }
 
         [HttpPost("refresh-token")]
@@ -46,11 +57,8 @@ namespace ApiAggregator.Controllers
 
         private string GenerateJwtToken(string username)
         {
-            var rawKey = _config["JwtSettings:SecretKey"]
-                ?? throw new InvalidOperationException("JwtSettings:SecretKey is missing in configuration.");
-
-            var secretKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(rawKey));
-            var credentials = new SigningCredentials(secretKey, SecurityAlgorithms.HmacSha256);
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.SecretKey));
+            var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
             var claims = new[]
             {
@@ -59,8 +67,8 @@ namespace ApiAggregator.Controllers
             };
 
             var token = new JwtSecurityToken(
-                issuer: _config["JwtSettings:Issuer"],
-                audience: _config["JwtSettings:Audience"],
+                issuer: _jwtSettings.Issuer,
+                audience: _jwtSettings.Audience,
                 claims: claims,
                 expires: DateTime.UtcNow.AddHours(1),
                 signingCredentials: credentials
@@ -72,6 +80,7 @@ namespace ApiAggregator.Controllers
 
     public class RefreshTokenRequest
     {
+        [Required]
         public string RefreshToken { get; set; } = string.Empty;
     }
 }

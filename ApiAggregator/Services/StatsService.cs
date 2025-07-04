@@ -9,14 +9,8 @@ namespace ApiAggregator.Services
     /// </summary>
     public class StatsService
     {
-        private class ApiStats
-        {
-            public long TotalRequests;
-            public long TotalDurationMs;
-            public long FastCount;
-            public long MediumCount;
-            public long SlowCount;
-        }
+        private const int FastThresholdMs = 100;
+        private const int MediumThresholdMs = 200;
 
         private readonly ConcurrentDictionary<string, ApiStats> _stats = new();
 
@@ -24,7 +18,7 @@ namespace ApiAggregator.Services
         /// Records a completed request's duration for a specified external API.
         /// Categorizes response time as Fast (<100ms), Medium (100–199ms), or Slow (200ms+).
         /// </summary>
-        /// <param name="apiName">The name of the external API (e.g., "OpenWeatherMap").</param>
+        /// <param name="apiName">The name of the external API.</param>
         /// <param name="durationMs">The response time in milliseconds.</param>
         public void Record(string apiName, long durationMs)
         {
@@ -33,32 +27,28 @@ namespace ApiAggregator.Services
             Interlocked.Increment(ref stat.TotalRequests);
             Interlocked.Add(ref stat.TotalDurationMs, durationMs);
 
-            if (durationMs < 100)
+            if (durationMs < FastThresholdMs)
                 Interlocked.Increment(ref stat.FastCount);
-            else if (durationMs < 200)
+            else if (durationMs < MediumThresholdMs)
                 Interlocked.Increment(ref stat.MediumCount);
             else
                 Interlocked.Increment(ref stat.SlowCount);
         }
 
         /// <summary>
-        /// Retrieves aggregated statistics for all tracked APIs,
-        /// including request counts and average response times.
+        /// Retrieves aggregated statistics for all tracked APIs.
         /// </summary>
         /// <returns>
-        /// A dictionary where each key is the API name and the value is an object
-        /// with statistics such as total requests, average response time, and
-        /// counts in Fast/Medium/Slow performance buckets.
+        /// A dictionary where each key is the API name and the value is an
+        /// <see cref="ApiStatisticsReport"/> with request counts, average time,
+        /// and Fast/Medium/Slow response buckets.
         /// </returns>
         public Dictionary<string, ApiStatisticsReport> GetStatisticsReport()
         {
             var report = new Dictionary<string, ApiStatisticsReport>();
 
-            foreach (var entry in _stats)
+            foreach (var (apiName, stat) in _stats)
             {
-                var apiName = entry.Key;
-                var stat = entry.Value;
-
                 if (stat.TotalRequests == 0) continue;
 
                 double average = (double)stat.TotalDurationMs / stat.TotalRequests;
@@ -74,6 +64,18 @@ namespace ApiAggregator.Services
             }
 
             return report;
+        }
+
+        /// <summary>
+        /// Internal record to track cumulative API stats with thread-safe counters.
+        /// </summary>
+        private class ApiStats
+        {
+            public long TotalRequests;
+            public long TotalDurationMs;
+            public long FastCount;
+            public long MediumCount;
+            public long SlowCount;
         }
     }
 }

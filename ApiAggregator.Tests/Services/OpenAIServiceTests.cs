@@ -1,5 +1,6 @@
 ﻿using ApiAggregator.Services;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Moq.Protected;
@@ -12,14 +13,14 @@ namespace ApiAggregator.Tests.Services
     public class OpenAIServiceTests
     {
         private readonly OpenAIService _openAIService;
-        private readonly Mock<IHttpClientFactory> _httpClientFactoryMock = new Mock<IHttpClientFactory>();
-        private readonly Mock<HttpMessageHandler> _handlerMock = new Mock<HttpMessageHandler>();
+        private readonly Mock<IHttpClientFactory> _httpClientFactoryMock = new();
+        private readonly Mock<HttpMessageHandler> _handlerMock = new();
         private readonly IMemoryCache _cache = new MemoryCache(new MemoryCacheOptions());
         private readonly IOptions<ExternalApiOptions> _options;
 
         public OpenAIServiceTests()
         {
-            // Configure ExternalApiOptions for OpenAI
+            // 1) Configure ExternalApiOptions for OpenAI
             var optionsModel = new ExternalApiOptions
             {
                 OpenAI = new ExternalApiOptions.OpenAiApi
@@ -33,7 +34,7 @@ namespace ApiAggregator.Tests.Services
             };
             _options = Options.Create(optionsModel);
 
-            // Prepare fake HTTP response
+            // 2) Prepare fake HTTP response
             var responseObj = new
             {
                 choices = new[]
@@ -45,9 +46,10 @@ namespace ApiAggregator.Tests.Services
             {
                 Content = new StringContent(JsonSerializer.Serialize(responseObj))
             };
-            fakeResponse.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            fakeResponse.Content.Headers.ContentType =
+                new MediaTypeHeaderValue("application/json");
 
-            // Setup mock handler
+            // 3) Setup mock handler
             _handlerMock.Protected()
                 .Setup<Task<HttpResponseMessage>>(
                     "SendAsync",
@@ -55,7 +57,7 @@ namespace ApiAggregator.Tests.Services
                     ItExpr.IsAny<CancellationToken>())
                 .ReturnsAsync(fakeResponse);
 
-            // Create HttpClient with mock handler
+            // 4) Create HttpClient with mock handler
             var client = new HttpClient(_handlerMock.Object)
             {
                 BaseAddress = new Uri(optionsModel.OpenAI.BaseUrl)
@@ -64,11 +66,13 @@ namespace ApiAggregator.Tests.Services
                 .Setup(f => f.CreateClient("OpenAI"))
                 .Returns(client);
 
-            // Construct the service under test
+            // 5) Construct the service under test, now including a logger
+            var logger = new Mock<ILogger<OpenAIService>>().Object;
             _openAIService = new OpenAIService(
                 _httpClientFactoryMock.Object,
                 _cache,
                 new StatsService(),
+                logger,
                 _options
             );
         }

@@ -1,4 +1,10 @@
 ﻿using ApiAggregator.Services;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ApiAggregator.HostedServices
 {
@@ -10,7 +16,7 @@ namespace ApiAggregator.HostedServices
         private readonly ILogger<PerformanceMonitorService> _logger;
         private readonly StatsService _stats;
         private readonly TimeSpan _interval = TimeSpan.FromMinutes(5);
-        private readonly Dictionary<string, double> _lastAverages = new();
+        private readonly Dictionary<string, double> _previousAverages = new();
 
         public PerformanceMonitorService(
             ILogger<PerformanceMonitorService> logger,
@@ -20,50 +26,53 @@ namespace ApiAggregator.HostedServices
             _stats = stats;
         }
 
-        /// <summary>
-        /// Checks the current statistics and logs a warning if any API's
-        /// average response time exceeds 150% of its previous average.
-        /// </summary>
-        public async Task CheckPerformanceAsync()
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            var report = _stats.GetStatisticsReport();
-            foreach (var kvp in report)
+            _logger.LogInformation("PerformanceMonitorService starting; checking every {Minutes} minutes", _interval.TotalMinutes);
+
+            // PeriodicTimer automatically respects cancellation
+            using var timer = new PeriodicTimer(_interval);
+            try
             {
-                var apiName = kvp.Key;
-                var avgNow = kvp.Value.AverageResponseTimeMs;
-                if (_lastAverages.TryGetValue(apiName, out var prevAvg) && prevAvg > 0)
+                while (await timer.WaitForNextTickAsync(stoppingToken))
                 {
-                    if (avgNow > prevAvg * 1.5)
+                    try
                     {
-                        _logger.LogWarning(
-                            "[PerformanceMonitor] Performance anomaly detected for {Api}: current average {Current}ms is >150% of previous {Previous}ms",
-                            apiName, avgNow, prevAvg);
+                        CheckPerformance();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error during performance check");
                     }
                 }
-                _lastAverages[apiName] = avgNow;
             }
-            await Task.CompletedTask;
+            catch (OperationCanceledException)
+            {
+                // Expected when the host is shutting down
+            }
+
+            _logger.LogInformation("PerformanceMonitorService stopping");
         }
 
         /// <summary>
-        /// Runs the background loop, invoking CheckPerformanceAsync at each interval.
+        /// Synchronously evaluates the latest averages against the previous run
+        /// and logs a warning if any have degraded by more than 50%.
         /// </summary>
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        private void CheckPerformance()
         {
-            _logger.LogInformation("PerformanceMonitorService started.");
-
-            while (!stoppingToken.IsCancellationRequested)
+            var report = _stats.GetStatisticsReport();
+            foreach (var (apiName, stats) in report)
             {
-                try
+                var avgNow = stats.AverageResponseTimeMs;
+                if (_previousAverages.TryGetValue(apiName, out var prevAvg)
+                    && prevAvg > 0
+                    && avgNow > prevAvg * 1.5)
                 {
-                    await CheckPerformanceAsync();
+                    _logger.LogWarning(
+                        "Performance anomaly for {Api}: current avg {Current}ms >150% of previous {Previous}ms",
+                        apiName, avgNow, prevAvg);
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error in PerformanceMonitorService");
-                }
-
-                await Task.Delay(_interval, stoppingToken);
+                _previousAverages[apiName] = avgNow;
             }
         }
     }

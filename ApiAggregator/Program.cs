@@ -12,47 +12,75 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Pull OpenAI API Key from config
+// Load API keys from config
 var openAiApiKey = builder.Configuration["ExternalApis:OpenAI:ApiKey"];
 
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 
-// MVC / Swagger
+// MVC & Swagger
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "API Aggregator", Version = "v1" });
+
+    // JWT support in Swagger
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization header using the Bearer scheme. Example: 'Bearer {token}'",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer"
+    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
 });
 
-// Caching & Stats
+// Memory cache and stats service
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<StatsService>();
 
-// Options binding
+// Strongly typed options binding
 builder.Services.AddOptions<ExternalApiOptions>()
     .Bind(builder.Configuration.GetSection("ExternalApis"))
     .ValidateDataAnnotations()
     .ValidateOnStart();
+
 builder.Services.Configure<JwtSettings>(
     builder.Configuration.GetSection("JwtSettings"));
+
 builder.Services.Configure<OpenAIConfig>(
     builder.Configuration.GetSection("ExternalApis:OpenAI"));
 
+// Ensure all required API keys are present
 builder.Services.PostConfigure<ExternalApiOptions>(opts =>
 {
-    if (string.IsNullOrWhiteSpace(opts.OpenWeather.ApiKey) ||
-        string.IsNullOrWhiteSpace(opts.NewsApi.ApiKey))
+    if (string.IsNullOrWhiteSpace(opts.GitHub.ApiKey) ||
+        string.IsNullOrWhiteSpace(opts.NewsApi.ApiKey) ||
+        string.IsNullOrWhiteSpace(opts.OpenAI.ApiKey))
     {
         throw new InvalidOperationException(
             "One or more API keys are missing. " +
-            "Populate them via dotnet user-secrets or CI secrets.");
+            "Populate them via user-secrets, appsettings.json, or environment variables.");
     }
 });
 
-// Authentication
+// Authentication setup
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -73,11 +101,11 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// HttpClients with Polly policies
-builder.Services.AddHttpClient("OpenWeather", client =>
+// Register HttpClients with Polly policies
+builder.Services.AddHttpClient("GitHub", client =>
 {
     client.BaseAddress = new Uri(
-        builder.Configuration["ExternalApis:OpenWeather:BaseUrl"]!);
+        builder.Configuration["ExternalApis:GitHub:BaseUrl"]!);
     client.DefaultRequestHeaders.Add("Accept", "application/json");
     client.Timeout = TimeSpan.FromSeconds(5);
 })
@@ -90,6 +118,7 @@ builder.Services.AddHttpClient("NewsApi", client =>
     client.BaseAddress = new Uri(
         builder.Configuration["ExternalApis:NewsApi:BaseUrl"]!);
     client.DefaultRequestHeaders.Add("Accept", "application/json");
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ApiAggregator");
     client.Timeout = TimeSpan.FromSeconds(5);
 })
 .SetHandlerLifetime(TimeSpan.FromMinutes(5))
@@ -101,21 +130,25 @@ builder.Services.AddHttpClient("OpenAI", client =>
     client.BaseAddress = new Uri("https://api.openai.com/v1/");
     client.DefaultRequestHeaders.Authorization =
         new AuthenticationHeaderValue("Bearer", openAiApiKey);
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+    client.Timeout = TimeSpan.FromSeconds(5);
 })
 .SetHandlerLifetime(TimeSpan.FromMinutes(5))
-.AddPolicyHandler(GetRetryPolicy());
+.AddPolicyHandler(GetRetryPolicy())
+.AddPolicyHandler(GetTimeoutPolicy());
 
-// DI: services & hosted tasks
-builder.Services.AddScoped<IWeatherService, WeatherService>();
+// Dependency injection for services
+builder.Services.AddScoped<IGitHubService, GitHubService>();
 builder.Services.AddScoped<INewsService, NewsService>();
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();
+
+// Hosted background service
 builder.Services.AddHostedService<PerformanceMonitorService>();
 
 var app = builder.Build();
 
-// Swagger UI tweaks
+// Swagger UI config
 app.UseSwagger();
-
 if (app.Environment.IsDevelopment())
 {
     app.UseSwaggerUI();
@@ -130,12 +163,11 @@ else
     });
 }
 
-// Request pipeline
+// Pipeline
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
-
 app.Run();
 
 // Polly helper policies
@@ -148,5 +180,5 @@ static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy() =>
 static IAsyncPolicy<HttpResponseMessage> GetTimeoutPolicy() =>
     Policy.TimeoutAsync<HttpResponseMessage>(5);
 
-// Model config record for OpenAI
+// For config binding (OpenAI section)
 public record OpenAIConfig(string Model, double Temperature, int MaxTokens);

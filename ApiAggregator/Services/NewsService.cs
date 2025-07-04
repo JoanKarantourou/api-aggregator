@@ -14,40 +14,30 @@ namespace ApiAggregator.Services
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IMemoryCache _cache;
         private readonly StatsService _stats;
+        private readonly ILogger<NewsService> _logger;
         private readonly string _apiKey;
 
-        // Allowed sortBy values to avoid API 400 errors
         private static readonly HashSet<string> ValidSortByOptions = new(StringComparer.OrdinalIgnoreCase)
         {
             "relevancy", "popularity", "publishedAt"
         };
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="NewsService"/> class.
-        /// </summary>
         public NewsService(
             IHttpClientFactory httpClientFactory,
             IMemoryCache cache,
             StatsService stats,
+            ILogger<NewsService> logger,
             IConfiguration config)
         {
             _httpClientFactory = httpClientFactory;
             _cache = cache;
             _stats = stats;
+            _logger = logger;
 
             _apiKey = config["ExternalApis:NewsApi:ApiKey"]
                 ?? throw new InvalidOperationException("NewsApi:ApiKey is missing from configuration.");
         }
 
-        /// <summary>
-        /// Retrieves news articles based on search query or category.
-        /// Caches results and tracks request statistics.
-        /// </summary>
-        /// <param name="query">Search keyword (optional).</param>
-        /// <param name="category">News category (used if query is not specified).</param>
-        /// <param name="sortBy">Sorting option (relevancy, popularity, or publishedAt).</param>
-        /// <param name="cancellationToken">Token to observe while waiting for the task to complete.</param>
-        /// <returns>A list of <see cref="NewsArticle"/> objects, or an empty list if failed or no data found.</returns>
         public async Task<List<NewsArticle>> GetNewsAsync(
             string query,
             string category,
@@ -88,13 +78,20 @@ namespace ApiAggregator.Services
             {
                 var response = await client.GetAsync(url, cancellationToken);
                 sw.Stop();
+
                 _stats.Record("NewsAPI", sw.ElapsedMilliseconds);
+                _logger.LogInformation("NewsAPI call took {Elapsed}ms for query='{Query}', category='{Category}'", sw.ElapsedMilliseconds, query, category);
 
                 if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("NewsAPI call failed with status {StatusCode}", response.StatusCode);
                     return new List<NewsArticle>();
+                }
 
                 string json = await response.Content.ReadAsStringAsync(cancellationToken);
-                var dto = JsonSerializer.Deserialize<NewsApiResponse>(json);
+                var dto = JsonSerializer.Deserialize<NewsApiResponse>(
+                json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 var articles = dto?.Articles?.Select(a => new NewsArticle
                 {
@@ -105,14 +102,15 @@ namespace ApiAggregator.Services
                     PublishedAt = a.PublishedAt
                 }).ToList() ?? new List<NewsArticle>();
 
-                _cache.Set(cacheKey, articles, TimeSpan.FromMinutes(10));
+                if (articles.Count > 0)
+                    _cache.Set(cacheKey, articles, TimeSpan.FromMinutes(10));
                 return articles;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 sw.Stop();
                 _stats.Record("NewsAPI", sw.ElapsedMilliseconds);
-                // Optionally log the exception
+                _logger.LogError(ex, "Exception occurred while fetching news for query='{Query}', category='{Category}'", query, category);
                 return new List<NewsArticle>();
             }
         }
