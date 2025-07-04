@@ -1,6 +1,5 @@
 ﻿using ApiAggregator.Models.Stats;
 using ApiAggregator.Services;
-using Xunit;
 
 namespace ApiAggregator.Tests.Services
 {

@@ -74,9 +74,12 @@ namespace ApiAggregator.Tests.Services
 
             // 5) construct service under test
             var logger = new Mock<ILogger<GitHubService>>().Object;
+            var statsService = new StatsService();
+
             _gitHubService = new GitHubService(
                 _httpFactoryMock.Object,
                 _cache,
+                statsService,
                 logger,
                 _options);
         }
