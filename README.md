@@ -8,7 +8,7 @@ A **single-endpoint REST API** that fetches data from three external services in
 
 | Area | Details |
 |------|---------|
-| Parallel calls | `Task.WhenAll` for GitHub, news, OpenAI completion |
+| Parallel calls | Fetches data from all services simultaneously for optimal performance - for GitHub, news, OpenAI completion |
 | Resilience | Polly **retry + timeout** policies on every `HttpClient` |
 | Caching | In-memory (`IMemoryCache`) with per-API TTL |
 | Auth | Optional **JWT bearer** (demo credentials via `appsettings.*`) |
